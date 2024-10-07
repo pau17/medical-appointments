@@ -1,0 +1,91 @@
+service: medical-appointments
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  region: eu-west-1
+  environment:
+    RDS_PE_CONNECTION_STRING: ${env:RDS_PE_CONNECTION_STRING}
+    RDS_CL_CONNECTION_STRING: ${env:RDS_CL_CONNECTION_STRING}
+    DYNAMODB_TABLE: ${env:DYNAMODB_TABLE}
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:PutItem
+        - dynamodb:GetItem
+        - dynamodb:UpdateItem
+        - sns:Publish
+        - sqs:SendMessage
+        - sqs:ReceiveMessage
+        - sqs:DeleteMessage
+        - events:PutEvents
+        - secretsmanager:GetSecretValue
+        - rds-db:connect
+      Resource:
+        - arn:aws:dynamodb:us-east-1:*:table/appointments
+        - arn:aws:sns:us-east-1:*:appointments_topic
+        - arn:aws:sqs:us-east-1:*:SQS_PE
+        - arn:aws:sqs:us-east-1:*:SQS_CL
+        - arn:aws:events:us-east-1:*:event-bus/default
+        - arn:aws:rds:us-east-1:*:db:appointments-db-pe
+        - arn:aws:rds:us-east-1:*:db:appointments-db-cl
+
+resources:
+  Resources:
+    AppointmentsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: appointments
+        AttributeDefinitions:
+          - AttributeName: insuredId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: insuredId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
+    AppointmentsSNSTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: appointments_topic
+
+    SQSPe:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: SQS_PE
+
+    SQSCl:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: SQS_CL
+
+functions:
+  appointment:
+    handler: src/application/handlers/appointment.handler
+    events:
+      - http:
+          path: appointments
+          method: post
+          cors: true
+
+  appointment_pe:
+    handler: src/application/handlers/appointment_pe.handler
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - SQSPe
+              - Arn
+
+  appointment_cl:
+    handler: src/application/handlers/appointment_cl.handler
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - SQSCl
+              - Arn
+
+plugins:
+  - serverless-dotenv-plugin
+  - serverless-offline
